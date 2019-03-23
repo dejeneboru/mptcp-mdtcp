@@ -1,0 +1,1 @@
+/home/doljira/workspace/mptcp-kernel/mptcp/scripts/gdb/vmlinux-gdb.py
