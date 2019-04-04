@@ -66,11 +66,10 @@ static unsigned int dctcp_alpha_on_init __read_mostly = DCTCP_MAX_ALPHA;
 module_param(dctcp_alpha_on_init, uint, 0644);
 MODULE_PARM_DESC(dctcp_alpha_on_init, "parameter for initial alpha value");
 
-static unsigned int dctcp_clamp_alpha_on_loss __read_mostly;
-module_param(dctcp_clamp_alpha_on_loss, uint, 0644);
-MODULE_PARM_DESC(dctcp_clamp_alpha_on_loss,
-		 "parameter for clamping alpha on loss");
-
+/*static unsigned int dctcp_halve_cwnd_on_loss __read_mostly;
+module_param(dctcp_halve_cwnd_on_loss, uint, 0644);
+MODULE_PARM_DESC(dctcp_halve_cwnd_on_loss, "halve cwnd in case of losses");
+*/
 static struct tcp_congestion_ops dctcp_reno;
 
 static void dctcp_reset(const struct tcp_sock *tp, struct dctcp *ca)
@@ -86,8 +85,8 @@ static void dctcp_init(struct sock *sk)
 	const struct tcp_sock *tp = tcp_sk(sk);
 
 	if ((tp->ecn_flags & TCP_ECN_OK) ||
-	    (sk->sk_state == TCP_LISTEN ||
-	     sk->sk_state == TCP_CLOSE)) {
+			(sk->sk_state == TCP_LISTEN ||
+			 sk->sk_state == TCP_CLOSE)) {
 		struct dctcp *ca = inet_csk_ca(sk);
 
 		ca->prior_snd_una = tp->snd_una;
@@ -113,15 +112,15 @@ static u32 dctcp_ssthresh(struct sock *sk)
 {
 	struct dctcp *ca = inet_csk_ca(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
-        //u32 reduction;
-        ca->loss_cwnd = tp->snd_cwnd;
-        /* Always reduce by at least 1MSS when receiving marks.*/
-        //reduction = max((tp->snd_cwnd * ca->dctcp_alpha) >> 11U, 1U);
+	//u32 reduction;
+	ca->loss_cwnd = tp->snd_cwnd;
+	/* Always reduce by at least 1MSS when receiving marks.*/
+	//reduction = max((tp->snd_cwnd * ca->dctcp_alpha) >> 11U, 1U);
 
-	
-        return max(tp->snd_cwnd - ((tp->snd_cwnd * ca->dctcp_alpha) >> 11U), 2U);
 
-       //return max(tp->snd_cwnd - reduction, 2U);
+	return max(tp->snd_cwnd - ((tp->snd_cwnd * ca->dctcp_alpha) >> 11U), 2U);
+
+	//return max(tp->snd_cwnd - reduction, 2U);
 }
 
 /* Minimal DCTP CE state machine:
@@ -177,7 +176,7 @@ static void dctcp_update_alpha(struct sock *sk, u32 flags)
 	//struct tcp_sock *tp = tcp_sk(sk);
 	const struct tcp_sock *tp = tcp_sk(sk);
 
-        struct dctcp *ca = inet_csk_ca(sk);
+	struct dctcp *ca = inet_csk_ca(sk);
 	u32 acked_bytes = tp->snd_una - ca->prior_snd_una;
 
 	/* If ack did not advance snd_una, count dupack as MSS size.
@@ -221,63 +220,47 @@ static void dctcp_update_alpha(struct sock *sk, u32 flags)
 }
 
 static void dctcp_react_to_loss(struct sock *sk)
- {
- 	struct dctcp *ca = inet_csk_ca(sk);
- 	struct tcp_sock *tp = tcp_sk(sk);
+{
+	struct dctcp *ca = inet_csk_ca(sk);
+	struct tcp_sock *tp = tcp_sk(sk);
 
-  	ca->loss_cwnd = tp->snd_cwnd;
- 	/* Stay fair with reno/cubic (RFC-style) */
- 	tp->snd_ssthresh = max(tp->snd_cwnd >> 1U, 2U);
- }
+	ca->loss_cwnd = tp->snd_cwnd;
+	/* Stay fair with reno/cubic (RFC-style) */
+	tp->snd_ssthresh = max(tp->snd_cwnd >> 1U, 2U);
+}
 
 static void dctcp_state(struct sock *sk, u8 new_state)
-{      if (new_state == TCP_CA_Recovery
- 	    && new_state != inet_csk(sk)->icsk_ca_state)
- 		/* React to the first fast retransmission of this window. */
- 		dctcp_react_to_loss(sk);
-
-	if (dctcp_clamp_alpha_on_loss && new_state == TCP_CA_Loss) {
-		struct dctcp *ca = inet_csk_ca(sk);
-
-		/* If this extension is enabled, we clamp dctcp_alpha to
-		 * max on packet loss; the motivation is that dctcp_alpha
-		 * is an indicator to the extend of congestion and packet
-		 * loss is an indicator of extreme congestion; setting
-		 * this in practice turned out to be beneficial, and
-		 * effectively assumes total congestion which reduces the
-		 * window by half.
-                 * Additionnally, this will cause the next cwnd reduction
- 		 * computed by dctcp_ssthresh() to be quite large even if the
- 		 * loss was a one time event due to the historical term in
- 		 * dctcp_alpha's EWMA.
-		 */
-		ca->dctcp_alpha = DCTCP_MAX_ALPHA;
-	}
+{
+	if ( new_state == TCP_CA_Recovery &&
+			new_state != inet_csk(sk)->icsk_ca_state)
+		dctcp_react_to_loss(sk);
+	/* We handle RTO in dctcp_cwnd_event to ensure that we perform only
+	 * one loss-adjustment per RTT.
+	 */
 }
+
 
 static void dctcp_cwnd_event(struct sock *sk, enum tcp_ca_event ev)
 {
 	switch (ev) {
-	case CA_EVENT_ECN_IS_CE:
-		dctcp_ce_state_0_to_1(sk);
-		break;
-	case CA_EVENT_ECN_NO_CE:
-		dctcp_ce_state_1_to_0(sk);
-		break;
-        case CA_EVENT_LOSS:
- 		/* React to a RTO if not other ssthresh reduction took place
- 		 * inside this window.
- 		 */
- 		dctcp_react_to_loss(sk);
- 		break;
-	default:
-		/* Don't care for the rest. */
-		break;
+		case CA_EVENT_ECN_IS_CE:
+			dctcp_ce_state_0_to_1(sk);
+			break;
+		case CA_EVENT_ECN_NO_CE:
+			dctcp_ce_state_1_to_0(sk);
+			break;
+		case CA_EVENT_LOSS:
+
+		        dctcp_react_to_loss(sk);
+			break;
+		default:
+			/* Don't care for the rest. */
+			break;
 	}
 }
-	
+
 static size_t dctcp_get_info(struct sock *sk, u32 ext, int *attr,
-			     union tcp_cc_info *info)
+		union tcp_cc_info *info)
 {
 	const struct dctcp *ca = inet_csk_ca(sk);
 
@@ -285,7 +268,7 @@ static size_t dctcp_get_info(struct sock *sk, u32 ext, int *attr,
 	 * We can still correctly retrieve it later.
 	 */
 	if (ext & (1 << (INET_DIAG_DCTCPINFO - 1)) ||
-	    ext & (1 << (INET_DIAG_VEGASINFO - 1))) {
+			ext & (1 << (INET_DIAG_VEGASINFO - 1))) {
 		memset(&info->dctcp, 0, sizeof(info->dctcp));
 		if (inet_csk(sk)->icsk_ca_ops != &dctcp_reno) {
 			info->dctcp.dctcp_enabled = 1;
