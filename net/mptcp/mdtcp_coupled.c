@@ -60,10 +60,6 @@ static unsigned int mdtcp_alpha_on_init __read_mostly = MDTCP_MAX_ALPHA;
 module_param(mdtcp_alpha_on_init, uint, 0644);
 MODULE_PARM_DESC(mdtcp_alpha_on_init, "parameter for initial alpha value");
 
-static unsigned int mdtcp_clamp_alpha_on_loss __read_mostly;
-module_param(mdtcp_clamp_alpha_on_loss, uint, 0644);
-MODULE_PARM_DESC(mdtcp_clamp_alpha_on_loss,
-		"parameter for clamping alpha on loss");
 static unsigned int mdtcp_debug __read_mostly = 0; 
 module_param(mdtcp_debug, uint, 0644);
 MODULE_PARM_DESC(mdtcp_debug, "enable debug");
@@ -168,7 +164,6 @@ static void mdtcp_ce_state_1_to_0(struct sock *sk)
 		 */
 		if (inet_csk(sk)->icsk_ack.pending & ICSK_ACK_TIMER)
 			__tcp_send_ack(sk, ca->prior_rcv_nxt);
-		//inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
 		tcp_enter_quickack_mode(sk, 1);
 	}
 
@@ -205,7 +200,9 @@ static void mdtcp_update_alpha(struct sock *sk, u32 flags)
 		u64 bytes_ecn = ca->acked_bytes_ecn;
 		u32 alpha = ca->mdtcp_alpha;
 		/* alpha = (1 - g) * alpha + g * F */
-		alpha -= min_not_zero(alpha, alpha >> mdtcp_shift_g);
+		//alpha -= min_not_zero(alpha, alpha >> mdtcp_shift_g);
+
+		alpha -= alpha >> mdtcp_shift_g;
 		if (bytes_ecn) {
 			/* If mdtcp_shift_g == 1, a 32bit value would overflow
 			 * after 8 Mbytes.
@@ -341,8 +338,8 @@ static void mdtcp_react_to_loss(struct sock *sk)
 
 static void mdtcp_state(struct sock *sk, u8 ca_state)
 {
-       if (ca_state == TCP_CA_Recovery && ca_state != inet_csk(sk)->icsk_ca_state)
-	        /* React to the first fast retransmission of this window. */
+	if (ca_state == TCP_CA_Recovery && ca_state != inet_csk(sk)->icsk_ca_state)
+		/* React to the first fast retransmission of this window. */
 		mdtcp_react_to_loss(sk);
 
 
@@ -350,23 +347,6 @@ static void mdtcp_state(struct sock *sk, u8 ca_state)
 		mdtcp_set_forced(mptcp_meta_sk(sk), 1);
 
 
-	if (mdtcp_clamp_alpha_on_loss && ca_state == TCP_CA_Loss) {
-		struct mdtcp *ca = inet_csk_ca(sk);
-
-		/* If this extension is enabled, we clamp mdtcp_alpha to
-		 * max on packet loss; the motivation is that mdtcp_alpha
-		 * is an indicator to the extend of congestion and packet
-		 * loss is an indicator of extreme congestion; setting
-		 * this in practice turned out to be beneficial, and
-		 * effectively assumes total congestion which reduces the
-		 * window by half.
-		 * Additionnally, this will cause the next cwnd reduction
-		 * computed by dctcp_ssthresh() to be quite large even if the
-		 * loss was a one time event due to the historical term in
-		 * dctcp_alpha's EWMA.
-		 */
-		ca->mdtcp_alpha = MDTCP_MAX_ALPHA;
-	}
 }
 
 /* In theory this is tp->snd_cwnd += 1 / tp->snd_cwnd (or alternative w),
@@ -430,26 +410,18 @@ static void mdtcp_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 
 		if (snd_cwnd < tp->snd_cwnd)
 			snd_cwnd = tp->snd_cwnd;
-		//snd_cwnd_old = snd_cwnd;
-		if (mpcb->cnt_established == 2) { 
 
-			mdtcp_cong_avoid_ai(tp, snd_cwnd, acked);
-			mdtcp_recalc_beta(sk);
-
-		} else { 
-
-			if (tp->snd_cwnd_cnt >= snd_cwnd) {
-				if (tp->snd_cwnd < tp->snd_cwnd_clamp) {
-					tp->snd_cwnd++;
-					mdtcp_recalc_beta(sk);
-				}
-
-				tp->snd_cwnd_cnt = 0;
-			} else {
-				tp->snd_cwnd_cnt++;
+		if (tp->snd_cwnd_cnt >= snd_cwnd) {
+			if (tp->snd_cwnd < tp->snd_cwnd_clamp) {
+				tp->snd_cwnd++;
+				mdtcp_recalc_beta(sk);
 			}
 
+			tp->snd_cwnd_cnt = 0;
+		} else {
+			tp->snd_cwnd_cnt++;
 		}
+
 
 	} else {
 
@@ -477,7 +449,7 @@ static void mdtcp_cwnd_event(struct sock *sk, enum tcp_ca_event ev)
 			/* React to a RTO if not other ssthresh reduction took place
 			 * inside this window.
 			 */
-			 mdtcp_react_to_loss(sk);
+			mdtcp_react_to_loss(sk);
 			if(mptcp(tp))
 				mdtcp_recalc_beta(sk);
 			break;
