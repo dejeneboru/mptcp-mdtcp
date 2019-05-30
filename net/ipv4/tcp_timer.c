@@ -84,8 +84,8 @@ static int tcp_out_of_resources(struct sock *sk, bool do_reset)
 		/* Catch exceptional cases, when connection requires reset.
 		 *      1. Last segment was sent recently. */
 		if ((s32)(tcp_jiffies32 - tp->lsndtime) <= TCP_TIMEWAIT_LEN ||
-		    /*  2. Window is closed. */
-		    (!tp->snd_wnd && !tp->packets_out))
+				/*  2. Window is closed. */
+				(!tp->snd_wnd && !tp->packets_out))
 			do_reset = true;
 		if (do_reset)
 			tp->ops->send_active_reset(sk, GFP_ATOMIC);
@@ -163,8 +163,8 @@ static void tcp_mtu_probing(struct inet_connection_sock *icsk, struct sock *sk)
  * retransmissions with an initial RTO of TCP_RTO_MIN.
  */
 bool retransmits_timed_out(struct sock *sk,
-			   unsigned int boundary,
-			   unsigned int timeout)
+		unsigned int boundary,
+		unsigned int timeout)
 {
 	const unsigned int rto_base = TCP_RTO_MIN;
 	unsigned int linear_backoff_thresh, start_ts;
@@ -173,8 +173,15 @@ bool retransmits_timed_out(struct sock *sk,
 		return false;
 
 	start_ts = tcp_sk(sk)->retrans_stamp;
-	if (unlikely(!start_ts))
-		start_ts = tcp_skb_timestamp(tcp_write_queue_head(sk));
+	if (unlikely(!start_ts)) {
+		struct sk_buff *skb = tcp_write_queue_head(sk);
+
+		if (!skb)
+			return false;
+
+		start_ts = tcp_skb_timestamp(skb);
+	}
+
 
 	if (likely(timeout == 0)) {
 		linear_backoff_thresh = ilog2(TCP_RTO_MAX/rto_base);
@@ -204,7 +211,7 @@ int tcp_write_timeout(struct sock *sk)
 				tcp_fastopen_cache_set(sk, 0, NULL, true, 0);
 			if (tp->syn_data && icsk->icsk_retransmits == 1)
 				NET_INC_STATS(sock_net(sk),
-					      LINUX_MIB_TCPFASTOPENACTIVEFAIL);
+						LINUX_MIB_TCPFASTOPENACTIVEFAIL);
 		} else if (!tp->syn_data && !tp->syn_fastopen) {
 			sk_rethink_txhash(sk);
 		}
@@ -213,7 +220,7 @@ int tcp_write_timeout(struct sock *sk)
 #ifdef CONFIG_MPTCP
 		/* Stop retransmitting MP_CAPABLE options in SYN if timed out. */
 		if (tcp_sk(sk)->request_mptcp &&
-		    icsk->icsk_retransmits >= sysctl_mptcp_syn_retries) {
+				icsk->icsk_retransmits >= sysctl_mptcp_syn_retries) {
 			tcp_sk(sk)->request_mptcp = 0;
 
 			MPTCP_INC_STATS(sock_net(sk), MPTCP_MIB_MPCAPABLERETRANSFALLBACK);
@@ -232,7 +239,7 @@ int tcp_write_timeout(struct sock *sk)
 				tcp_fastopen_cache_set(sk, 0, NULL, true, 0);
 				if (icsk->icsk_retransmits == net->ipv4.sysctl_tcp_retries1)
 					NET_INC_STATS(sock_net(sk),
-						      LINUX_MIB_TCPFASTOPENACTIVEFAIL);
+							LINUX_MIB_TCPFASTOPENACTIVEFAIL);
 			}
 			/* Black hole detection */
 			tcp_mtu_probing(icsk, sk);
@@ -254,7 +261,7 @@ int tcp_write_timeout(struct sock *sk)
 				return 1;
 		}
 		expired = retransmits_timed_out(sk, retry_until,
-						icsk->icsk_user_timeout);
+				icsk->icsk_user_timeout);
 	}
 	if (expired) {
 		/* Has it gone just too far? */
@@ -272,7 +279,7 @@ void tcp_delack_timer_handler(struct sock *sk)
 	sk_mem_reclaim_partial(sk);
 
 	if (((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN)) ||
-	    !(icsk->icsk_ack.pending & ICSK_ACK_TIMER))
+			!(icsk->icsk_ack.pending & ICSK_ACK_TIMER))
 		goto out;
 
 	if (time_after(icsk->icsk_ack.timeout, jiffies)) {
@@ -358,8 +365,8 @@ static void tcp_probe_timer(struct sock *sk)
 	if (!start_ts)
 		tcp_send_head(sk)->skb_mstamp = tp->tcp_mstamp;
 	else if (icsk->icsk_user_timeout &&
-		 (s32)(tcp_time_stamp(tp) - start_ts) >
-		 jiffies_to_msecs(icsk->icsk_user_timeout))
+			(s32)(tcp_time_stamp(tp) - start_ts) >
+			jiffies_to_msecs(icsk->icsk_user_timeout))
 		goto abort;
 
 	max_probes = sock_net(sk)->ipv4.sysctl_tcp_retries2;
@@ -389,7 +396,7 @@ static void tcp_fastopen_synack_timer(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int max_retries = icsk->icsk_syn_retries ? :
-	    sock_net(sk)->ipv4.sysctl_tcp_synack_retries + 1; /* add one more retry for fastopen */
+		sock_net(sk)->ipv4.sysctl_tcp_synack_retries + 1; /* add one more retry for fastopen */
 	struct request_sock *req;
 
 	req = tcp_sk(sk)->fastopen_rsk;
@@ -408,7 +415,7 @@ static void tcp_fastopen_synack_timer(struct sock *sk)
 	req->num_timeout++;
 	icsk->icsk_retransmits++;
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-			  TCP_TIMEOUT_INIT << req->num_timeout, TCP_RTO_MAX);
+			TCP_TIMEOUT_INIT << req->num_timeout, TCP_RTO_MAX);
 }
 
 
@@ -431,7 +438,7 @@ void tcp_retransmit_timer(struct sock *sk)
 
 	if (tp->fastopen_rsk) {
 		WARN_ON_ONCE(sk->sk_state != TCP_SYN_RECV &&
-			     sk->sk_state != TCP_FIN_WAIT1);
+				sk->sk_state != TCP_FIN_WAIT1);
 		tcp_fastopen_synack_timer(sk);
 		/* Before we receive ACK to our SYN-ACK don't retransmit
 		 * anything else (e.g., data or FIN segments).
@@ -446,7 +453,7 @@ void tcp_retransmit_timer(struct sock *sk)
 	tp->tlp_high_seq = 0;
 
 	if (!tp->snd_wnd && !sock_flag(sk, SOCK_DEAD) &&
-	    !((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV))) {
+			!((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV))) {
 		/* Receiver dastardly shrinks window. Our retransmits
 		 * become zero probes, but we should not timeout this
 		 * connection. If the socket is an orphan, time it out,
@@ -455,18 +462,18 @@ void tcp_retransmit_timer(struct sock *sk)
 		struct inet_sock *inet = inet_sk(sk);
 		if (sk->sk_family == AF_INET) {
 			net_dbg_ratelimited("Peer %pI4:%u/%u unexpectedly shrunk window %u:%u (repaired)\n",
-					    &inet->inet_daddr,
-					    ntohs(inet->inet_dport),
-					    inet->inet_num,
-					    tp->snd_una, tp->snd_nxt);
+					&inet->inet_daddr,
+					ntohs(inet->inet_dport),
+					inet->inet_num,
+					tp->snd_una, tp->snd_nxt);
 		}
 #if IS_ENABLED(CONFIG_IPV6)
 		else if (sk->sk_family == AF_INET6) {
 			net_dbg_ratelimited("Peer %pI6:%u/%u unexpectedly shrunk window %u:%u (repaired)\n",
-					    &sk->sk_v6_daddr,
-					    ntohs(inet->inet_dport),
-					    inet->inet_num,
-					    tp->snd_una, tp->snd_nxt);
+					&sk->sk_v6_daddr,
+					ntohs(inet->inet_dport),
+					inet->inet_num,
+					tp->snd_una, tp->snd_nxt);
 		}
 #endif
 		if (tcp_jiffies32 - tp->rcv_tstamp > TCP_RTO_MAX) {
@@ -493,7 +500,7 @@ void tcp_retransmit_timer(struct sock *sk)
 		} else if (icsk->icsk_ca_state == TCP_CA_Loss) {
 			mib_idx = LINUX_MIB_TCPLOSSFAILURES;
 		} else if ((icsk->icsk_ca_state == TCP_CA_Disorder) ||
-			   tp->sacked_out) {
+				tp->sacked_out) {
 			if (tcp_is_sack(tp))
 				mib_idx = LINUX_MIB_TCPSACKFAILURES;
 			else
@@ -513,8 +520,8 @@ void tcp_retransmit_timer(struct sock *sk)
 		if (!icsk->icsk_retransmits)
 			icsk->icsk_retransmits = 1;
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-					  min(icsk->icsk_rto, TCP_RESOURCE_PROBE_INTERVAL),
-					  TCP_RTO_MAX);
+				min(icsk->icsk_rto, TCP_RESOURCE_PROBE_INTERVAL),
+				TCP_RTO_MAX);
 		goto out;
 	}
 
@@ -547,9 +554,9 @@ out_reset_timer:
 	 * linear-timeout retransmissions into a black hole
 	 */
 	if (sk->sk_state == TCP_ESTABLISHED &&
-	    (tp->thin_lto || sysctl_tcp_thin_linear_timeouts) &&
-	    tcp_stream_is_thin(tp) &&
-	    icsk->icsk_retransmits <= TCP_THIN_LINEAR_RETRIES) {
+			(tp->thin_lto || sysctl_tcp_thin_linear_timeouts) &&
+			tcp_stream_is_thin(tp) &&
+			icsk->icsk_retransmits <= TCP_THIN_LINEAR_RETRIES) {
 		icsk->icsk_backoff = 0;
 		icsk->icsk_rto = min(__tcp_set_rto(tp), TCP_RTO_MAX);
 	} else {
@@ -571,7 +578,7 @@ void tcp_write_timer_handler(struct sock *sk)
 	int event;
 
 	if (((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN)) ||
-	    !icsk->icsk_pending)
+			!icsk->icsk_pending)
 		goto out;
 
 	if (time_after(icsk->icsk_timeout, jiffies)) {
@@ -583,20 +590,20 @@ void tcp_write_timer_handler(struct sock *sk)
 	event = icsk->icsk_pending;
 
 	switch (event) {
-	case ICSK_TIME_REO_TIMEOUT:
-		tcp_rack_reo_timeout(sk);
-		break;
-	case ICSK_TIME_LOSS_PROBE:
-		tcp_send_loss_probe(sk);
-		break;
-	case ICSK_TIME_RETRANS:
-		icsk->icsk_pending = 0;
-		tcp_sk(sk)->ops->retransmit_timer(sk);
-		break;
-	case ICSK_TIME_PROBE0:
-		icsk->icsk_pending = 0;
-		tcp_probe_timer(sk);
-		break;
+		case ICSK_TIME_REO_TIMEOUT:
+			tcp_rack_reo_timeout(sk);
+			break;
+		case ICSK_TIME_LOSS_PROBE:
+			tcp_send_loss_probe(sk);
+			break;
+		case ICSK_TIME_RETRANS:
+			icsk->icsk_pending = 0;
+			tcp_sk(sk)->ops->retransmit_timer(sk);
+			break;
+		case ICSK_TIME_PROBE0:
+			icsk->icsk_pending = 0;
+			tcp_probe_timer(sk);
+			break;
 	}
 
 out:
@@ -694,7 +701,7 @@ static void tcp_keepalive_timer (unsigned long data)
 	}
 
 	if (!sock_flag(sk, SOCK_KEEPOPEN) ||
-	    ((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_SYN_SENT)))
+			((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_SYN_SENT)))
 		goto out;
 
 	elapsed = keepalive_time_when(tp);
@@ -710,10 +717,10 @@ static void tcp_keepalive_timer (unsigned long data)
 		 * to determine when to timeout instead.
 		 */
 		if ((icsk->icsk_user_timeout != 0 &&
-		    elapsed >= icsk->icsk_user_timeout &&
-		    icsk->icsk_probes_out > 0) ||
-		    (icsk->icsk_user_timeout == 0 &&
-		    icsk->icsk_probes_out >= keepalive_probes(tp))) {
+					elapsed >= icsk->icsk_user_timeout &&
+					icsk->icsk_probes_out > 0) ||
+				(icsk->icsk_user_timeout == 0 &&
+				 icsk->icsk_probes_out >= keepalive_probes(tp))) {
 			tp->ops->send_active_reset(sk, GFP_ATOMIC);
 			tcp_write_err(sk);
 			goto out;
@@ -749,8 +756,8 @@ out:
 void tcp_init_xmit_timers(struct sock *sk)
 {
 	inet_csk_init_xmit_timers(sk, &tcp_write_timer, &tcp_delack_timer,
-				  &tcp_keepalive_timer);
+			&tcp_keepalive_timer);
 	hrtimer_init(&tcp_sk(sk)->pacing_timer, CLOCK_MONOTONIC,
-		     HRTIMER_MODE_ABS_PINNED);
+			HRTIMER_MODE_ABS_PINNED);
 	tcp_sk(sk)->pacing_timer.function = tcp_pace_kick;
 }
