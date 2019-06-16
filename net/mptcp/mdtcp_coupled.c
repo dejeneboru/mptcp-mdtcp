@@ -200,9 +200,9 @@ static void mdtcp_update_alpha(struct sock *sk, u32 flags)
 		u64 bytes_ecn = ca->acked_bytes_ecn;
 		u32 alpha = ca->mdtcp_alpha;
 		/* alpha = (1 - g) * alpha + g * F */
-		//alpha -= min_not_zero(alpha, alpha >> mdtcp_shift_g);
+		alpha -= min_not_zero(alpha, alpha >> mdtcp_shift_g);
 
-		alpha -= alpha >> mdtcp_shift_g;
+		//alpha -= alpha >> mdtcp_shift_g;
 		if (bytes_ecn) {
 			/* If mdtcp_shift_g == 1, a 32bit value would overflow
 			 * after 8 Mbytes.
