@@ -45,19 +45,20 @@
 #include <net/tcp.h>
 #include <linux/inet_diag.h>
 
-#define DCTCP_MAX_ALPHA	1024U
-
+//#define DCTCP_MAX_ALPHA	1024U
+#define DCTCP_ALPHA_WIDTH 10U
+#define DCTCP_MAX_ALPHA    (1U << DCTCP_ALPHA_WIDTH)
 struct dctcp {
 	u32 acked_bytes_ecn;
 	u32 acked_bytes_total;
 	u32 prior_snd_una;
 	u32 prior_rcv_nxt;
-	u32 dctcp_alpha;
+	u32 dctcp_alpha; /* This holds alpha << dctcp_shift_g */
 	u32 next_seq;
 	u32 ce_state;
 	u32 loss_cwnd;
 };
-
+/* dctcp_shift_g should be <= 22 (= width(dctcp_alpha) - DCTCP_ALPHA_WIDTH) */
 static unsigned int dctcp_shift_g __read_mostly = 4; /* g = 1/2^4 */
 module_param(dctcp_shift_g, uint, 0644);
 MODULE_PARM_DESC(dctcp_shift_g, "parameter g for updating dctcp_alpha");
@@ -67,9 +68,9 @@ module_param(dctcp_alpha_on_init, uint, 0644);
 MODULE_PARM_DESC(dctcp_alpha_on_init, "parameter for initial alpha value");
 
 /*static unsigned int dctcp_halve_cwnd_on_loss __read_mostly;
-module_param(dctcp_halve_cwnd_on_loss, uint, 0644);
-MODULE_PARM_DESC(dctcp_halve_cwnd_on_loss, "halve cwnd in case of losses");
-*/
+  module_param(dctcp_halve_cwnd_on_loss, uint, 0644);
+  MODULE_PARM_DESC(dctcp_halve_cwnd_on_loss, "halve cwnd in case of losses");
+  */
 static struct tcp_congestion_ops dctcp_reno;
 
 static void dctcp_reset(const struct tcp_sock *tp, struct dctcp *ca)
@@ -92,8 +93,8 @@ static void dctcp_init(struct sock *sk)
 		ca->prior_snd_una = tp->snd_una;
 		ca->prior_rcv_nxt = tp->rcv_nxt;
 
-		ca->dctcp_alpha = min(dctcp_alpha_on_init, DCTCP_MAX_ALPHA);
 
+		ca->dctcp_alpha = min(dctcp_alpha_on_init, DCTCP_MAX_ALPHA)<< dctcp_shift_g ;
 		ca->loss_cwnd = 0;
 		ca->ce_state = 0;
 
@@ -112,15 +113,12 @@ static u32 dctcp_ssthresh(struct sock *sk)
 {
 	struct dctcp *ca = inet_csk_ca(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
-	//u32 reduction;
+	u32 alpha;
+
 	ca->loss_cwnd = tp->snd_cwnd;
-	/* Always reduce by at least 1MSS when receiving marks.*/
-	//reduction = max((tp->snd_cwnd * ca->dctcp_alpha) >> 11U, 1U);
+	alpha = ca->dctcp_alpha >> dctcp_shift_g;
+	return max(tp->snd_cwnd-((tp->snd_cwnd * alpha) >> (DCTCP_ALPHA_WIDTH + 1U)), 2U);
 
-
-	return max(tp->snd_cwnd - ((tp->snd_cwnd * ca->dctcp_alpha) >> 11U), 2U);
-
-	//return max(tp->snd_cwnd - reduction, 2U);
 }
 
 /* Minimal DCTP CE state machine:
@@ -197,18 +195,29 @@ static void dctcp_update_alpha(struct sock *sk, u32 flags)
 		u64 bytes_ecn = ca->acked_bytes_ecn;
 		u32 alpha = ca->dctcp_alpha;
 
-		/* alpha = (1 - g) * alpha + g * F */
-                //alpha -= alpha >> dctcp_shift_g;
+		
+		//alpha -= alpha >> dctcp_shift_g;
+
+		/* alpha = (1 - g) * alpha + g * F
+
+		   We use dctcp_shift_g = G = 1 / g
+		   and store dctcp_alpha = A = alpha * G
+
+		   The EWMA then becomes A = A * (1 - 1/G) + F
+		   */
+
+
 		alpha -= min_not_zero(alpha, alpha >> dctcp_shift_g);
 		if (bytes_ecn) {
-			/* If dctcp_shift_g == 1, a 32bit value would overflow
-			 * after 8 Mbytes.
-			 */
-			bytes_ecn <<= (10 - dctcp_shift_g);
+			/* A 32bit value would overflow after 4 Mbytes.
+			   F's ratio is expanded to fit alpha's resolution.
+			   */
+			bytes_ecn <<= DCTCP_ALPHA_WIDTH;
 			do_div(bytes_ecn, max(1U, ca->acked_bytes_total));
-
-			alpha = min(alpha + (u32)bytes_ecn, DCTCP_MAX_ALPHA);
 		}
+
+		alpha = alpha - (alpha >> dctcp_shift_g) + bytes_ecn;
+
 		/* dctcp_alpha can be read from dctcp_get_info() without
 		 * synchro, so we ask compiler to not use dctcp_alpha
 		 * as a temporary variable in prior operations.
@@ -251,7 +260,7 @@ static void dctcp_cwnd_event(struct sock *sk, enum tcp_ca_event ev)
 			break;
 		case CA_EVENT_LOSS:
 
-		        dctcp_react_to_loss(sk);
+			dctcp_react_to_loss(sk);
 			break;
 		default:
 			/* Don't care for the rest. */

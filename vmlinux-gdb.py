@@ -1,1 +1,1 @@
-/home/doljira/workspace/mptcp-kernel/mptcp/mptcp-mdtcp/scripts/gdb/vmlinux-gdb.py
+/home/dv/doljira/repos/mptcp-mdtcp/scripts/gdb/vmlinux-gdb.py
